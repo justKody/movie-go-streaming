@@ -11,12 +11,10 @@ import (
 	"github.com/justKody/movie-streaming-go/server/utils/response"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"github.com/go-playground/validator/v10"
 )
 
 var movieCollection *mongo.Collection = database.OpenCollection("movies")
 
-var validate = validator.New()
 
 func GetMovies() gin.HandlerFunc {
 	return func(c *gin.Context) {
