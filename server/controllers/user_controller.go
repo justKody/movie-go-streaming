@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/justKody/movie-streaming-go/server/database"
 	"github.com/justKody/movie-streaming-go/server/models"
+	"github.com/justKody/movie-streaming-go/server/utils"
 	"github.com/justKody/movie-streaming-go/server/utils/response"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -24,7 +25,7 @@ func SignUp() gin.HandlerFunc {
 		var user models.User
 
 		if err := c.ShouldBindJSON(&user); err != nil {
-			response.SuccessResponse(c, http.StatusBadRequest, "Invalid input data.")
+			response.ErrorResponse(c, http.StatusBadRequest, "Invalid input data.")
 		}
 		if err := validate.Struct(user); err != nil {
 			response.ValidationErrorResponse(c, err)
@@ -72,12 +73,72 @@ func SignUp() gin.HandlerFunc {
 	}
 }
 
-// func Login() gin.HandlerFunc {
-// 	return func(c *gin.Context) {
-// 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-// 		defer cancel()
-// 	}
-// }
+func Login() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var userLogin models.UserLogin
+
+		if err := c.ShouldBindJSON(&userLogin); err != nil {
+			response.ErrorResponse(c, http.StatusBadRequest, "Invalid input data.")
+			return
+		}
+
+		if err := validate.Struct(userLogin); err != nil {
+			response.ValidationErrorResponse(c, err)
+			return
+		}
+
+		// finding the user
+
+		var foundUser models.User
+		err := userCollection.FindOne(ctx, bson.M{
+			"email": userLogin.Email,
+		}).Decode(&foundUser)
+
+		if err != nil {
+			response.ErrorResponse(c, http.StatusUnauthorized, "Invalid email or password.")
+			return
+		}
+
+		// compare the hash
+		err = bcrypt.CompareHashAndPassword([]byte(foundUser.Password), []byte(userLogin.Password))
+
+		if err != nil {
+			response.ErrorResponse(c, http.StatusUnauthorized, "Invalid email or password.")
+			return
+		}
+
+		signedToken, signedRefreshToken, err := utils.GenerateAllTokens(foundUser.Email, foundUser.FirstName, foundUser.LastName, foundUser.Role, foundUser.UserID)
+
+		if err != nil {
+			response.ErrorResponse(c, http.StatusUnauthorized, "Failed to generate tokens.")
+			return
+		}
+
+		err = utils.UpdateAllTokens(foundUser.UserID, signedToken, signedRefreshToken)
+
+		if err != nil {
+			response.ErrorResponse(c, http.StatusInternalServerError, "Something went wrong.")
+			return
+		}
+
+		userResponse := models.UserResponse{
+			UserId:          foundUser.UserID,
+			FirstName:       foundUser.FirstName,
+			LastName:        foundUser.LastName,
+			Email:           foundUser.Email,
+			Role:            foundUser.Role,
+			Token:           signedToken,
+			RefreshToken:    signedRefreshToken,
+			FavouriteGenres: foundUser.FavouriteGenre,
+		}
+
+		response.SuccessResponse(c, http.StatusOK, userResponse)
+
+	}
+}
 
 func hashPassword(password string) (string, error) {
 	hashpassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
