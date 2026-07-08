@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/justKody/movie-streaming-go/server/database"
-	"github.com/wailsapp/wails/lib/interfaces"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -36,7 +35,7 @@ func GetAccessToken(c *gin.Context) (string, error) {
         return "", errors.New("authorization header is missing")
     }
 
-	tokenString := authHeader[len("Bearer "):]
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 	if tokenString == "" {
 		return "", errors.New("Bearer token is required")
@@ -99,7 +98,7 @@ func GenerateAllTokens(email, firstName, lastName, role, userId string) (string,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "magic stream",
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * 7 *dd time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * 7 * time.Hour)),
 		},
 	}
 
@@ -116,9 +115,7 @@ func GenerateAllTokens(email, firstName, lastName, role, userId string) (string,
 
 func UpdateAllTokens(userId, token, refreshToken string) (err error) {
 	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
-	defer cancel(
-
-	)
+	defer cancel()
 	updatedAt := time.Now()
 
 	updateData := bson.M{
@@ -139,3 +136,18 @@ func UpdateAllTokens(userId, token, refreshToken string) (err error) {
 	return nil
 }
 
+func GetUserIdFromContext(c *gin.Context) (string, error) {
+	userId, exists  := c.Get("userId")
+
+	if !exists {
+		return "", errors.New("userId does not exists in this context")
+	}
+
+	id, ok := userId.(string) // kinda important
+
+	if !ok {
+		return "", errors.New("invalid userId type")
+	}
+
+	return id, nil
+}

@@ -11,4 +11,5 @@ func SetupProtectedRoutes(router *gin.Engine) {
 
 	router.GET("/movie/:imdb_id", controllers.GetMovie())
 	router.POST("/movie", controllers.AddMovie())
+	router.POST("/movie/:imdb_id/admin-review", controllers.AdminReviewUpdate())
 }
