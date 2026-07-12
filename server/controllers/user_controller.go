@@ -15,13 +15,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var userCollection *mongo.Collection = database.OpenCollection("users")
-
-func SignUp() gin.HandlerFunc {
+func SignUp(Client *mongo.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
 
+		userCollection := database.OpenCollection("users", Client)
 		var user models.User
 
 		if err := c.ShouldBindJSON(&user); err != nil {
@@ -73,11 +72,12 @@ func SignUp() gin.HandlerFunc {
 	}
 }
 
-func Login() gin.HandlerFunc {
+func Login(Client *mongo.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
 
+		userCollection := database.OpenCollection("users", Client)
 		var userLogin models.UserLogin
 
 		if err := c.ShouldBindJSON(&userLogin); err != nil {
@@ -117,7 +117,7 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		err = utils.UpdateAllTokens(foundUser.UserID, signedToken, signedRefreshToken)
+		err = utils.UpdateAllTokens(Client, foundUser.UserID, signedToken, signedRefreshToken)
 
 		if err != nil {
 			response.ErrorResponse(c, http.StatusInternalServerError, "Something went wrong.")
@@ -149,4 +149,3 @@ func hashPassword(password string) (string, error) {
 
 	return string(hashpassword), nil
 }
-
