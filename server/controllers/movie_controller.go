@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var movieCollection *mongo.Collection = database.OpenCollection("movies")
@@ -103,6 +105,12 @@ func AddMovie() gin.HandlerFunc {
 
 func AdminReviewUpdate() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		role, err := utils.GetRoleFromContext(c)
+		if role != "admin" {
+			response.ErrorResponse(c, http.StatusForbidden, "You are not authorized to update admin review")
+			return
+		}
+
 		movieId := c.Param("imdb_id")
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		cancel()
@@ -258,34 +266,102 @@ func GetRankings() ([]models.Ranking, error) {
 
 }
 
-// func GetRecommendedMovies() gin.HandlerFunc {
-// 	return func(c *gin.Context) {
-// 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-// 		defer cancel()
+func GetRecommendedMovies() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
 
-// 		userId, err := utils.GetUserIdFromContext(c)
+		userId, err := utils.GetUserIdFromContext(c)
 
-// 		if err != nil {
-// 			response.ErrorResponse(c, http.StatusBadRequest, "User Id in context not found")
-// 			return
-// 		}
+		if err != nil {
+			response.ErrorResponse(c, http.StatusBadRequest, "User Id in context not found")
+			return
+		}
 
-// 		var movies []models.Movie
+		favGenres, err := GetUsersFavouriteGenres(userId)
 
-// 		cursor, err := movieCollection.Find(ctx, bson.M{})
+		if err != nil {
+			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to get favourite genres")
+			return
+		}
 
-// 		if err != nil {
-// 			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch movies.")
-// 		}
+		// get movieRecemondation limit from .env
+		movieRecommendationLimit := os.Getenv("MOVIE_RECOMMENDATION_LIMIT")
+		if movieRecommendationLimit == "" {
+			movieRecommendationLimit = "10"
+		}
 
-// 		defer cursor.Close(ctx)
+		limit, err := strconv.ParseInt(movieRecommendationLimit, 10, 64)
+		if err != nil {
+			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to convert movie recommendation limit to integer")
+			return
+		}
 
-// 		if err = cursor.All(ctx, &movies); err != nil {
-// 			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to decode movies.")
-// 		}
+		filter := bson.M{
+			"genres": bson.M{"$in": favGenres},
+		}
 
-// 		response.SuccessResponse(c, http.StatusOK, movies)
-// 	}
-// }
+		opts := options.Find().SetSort(bson.M{"ranking.ranking_value": -1}).SetLimit(limit)
 
+		cursor, err := movieCollection.Find(ctx, filter, opts)
 
+		if err != nil {
+			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch movies")
+		}
+		defer cursor.Close(ctx)
+
+		var movies []models.Movie
+
+		if err = cursor.All(ctx, &movies); err != nil {
+			response.ErrorResponse(c, http.StatusInternalServerError, "Failed to decode movies")
+		}
+
+		response.SuccessResponse(c, http.StatusOK, movies)
+	}
+}
+
+func GetUsersFavouriteGenres(userId string) ([]string, error) {
+	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.M{"user_id": userId}
+
+	projection := bson.M{
+		"favourite_genres.genre_name": 1,
+		"_id":                         0,
+	}
+
+	opts := options.FindOne().SetProjection(projection)
+	var result bson.M
+
+	err := userCollection.FindOne(ctx, filter, opts).Decode(&result)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return []string{}, nil
+		}
+	}
+
+	favGenresArray, ok := result["favourite_genres"].(bson.A)
+
+	if !ok {
+		return []string{}, errors.New("favourite_genres is not an array")
+	}
+
+	favGenres := make([]string, len(favGenresArray))
+
+	for i, genre := range favGenresArray {
+		genreMap, ok := genre.(bson.M)
+		if !ok {
+			return nil, errors.New("invalid genre object")
+		}
+
+		name, ok := genreMap["genre_name"].(string)
+		if !ok {
+			return nil, errors.New("genre_name is not a string")
+		}
+
+		favGenres[i] = name
+	}
+	return favGenres, nil
+}
